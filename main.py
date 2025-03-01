@@ -1,8 +1,9 @@
 import requests
 import json
+import os
 
 def ping_claude_api():
-    api_key = "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"
+    api_key = os.getenv("API_KEY")
     url = "https://api.anthropic.com/v1/messages"
     headers = {
         "Content-Type": "application/json",
