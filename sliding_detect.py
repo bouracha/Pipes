@@ -27,46 +27,44 @@ def load_model(weights_path, device=''):
     return model, device
 
 
-def process_window(model, img, device, conf_thres=0.25, iou_thres=0.45, window_offset=(0, 0)):
-    """Process a single window and return detections"""
-    # Prepare image for inference
-    img = img.transpose(2, 0, 1)  # HWC to CHW
+def process_window(model, window, device, conf_thres, iou_thres, window_offset=(0, 0)):
+    # Ensure consistent dimensions by explicitly resizing to model's expected input size
+    img_size = model.stride.max() * 32  # Default YOLOv5 image size
+
+    # Force resize to desired dimensions
+    img = letterbox(window, img_size, stride=model.stride, auto=model.pt)[0]
+
+    # Convert
+    img = img.transpose((2, 0, 1))  # HWC to CHW
+    img = np.ascontiguousarray(img)
+
     img = torch.from_numpy(img).to(device)
-    img = img.float() / 255.0  # 0 - 255 to 0.0 - 1.0
+    img = img.float()
+    img /= 255.0  # Normalize
 
-    if img.ndimension() == 3:
-        img = img.unsqueeze(0)
+    if len(img.shape) == 3:
+        img = img.unsqueeze(0)  # Add batch dimension
 
-    # Inference
+    # Run inference
     with torch.no_grad():
         pred = model(img)[0]
 
-    # Apply NMS - implement a simplified version to avoid import issues
-    detections = []
-    if pred.shape[1] > 0:
-        # Get boxes
-        boxes = pred[:, :4]
-        scores = pred[:, 4:5] * pred[:, 5:]  # conf * class_prob
-        class_ids = torch.argmax(pred[:, 5:], dim=1, keepdim=True)
-        confidences = torch.max(pred[:, 5:], dim=1, keepdim=True)[0] * pred[:, 4:5]
+    # NMS
+    pred = non_max_suppression(pred, conf_thres, iou_thres)
 
-        # Combine into [x1, y1, x2, y2, conf, cls]
-        pred_combined = torch.cat((boxes, confidences, class_ids.float()), dim=1)[0]
+    # Process detections and adjust coordinates based on window offset
+    results = []
+    for det in pred:  # per image
+        if len(det):
+            # Adjust coordinates based on window_offset
+            adjusted_det = det.clone()
+            adjusted_det[:, 0] += window_offset[0]  # x1
+            adjusted_det[:, 2] += window_offset[0]  # x2
+            adjusted_det[:, 1] += window_offset[1]  # y1
+            adjusted_det[:, 3] += window_offset[1]  # y2
+            results.append(adjusted_det)
 
-        # Filter by confidence
-        keep_mask = pred_combined[:, 4] > conf_thres
-        pred_filtered = pred_combined[keep_mask]
-
-        # Extract detections and add window offset
-        for det in pred_filtered:
-            # Add offset to absolute position
-            det[0] += window_offset[0]  # x1
-            det[1] += window_offset[1]  # y1
-            det[2] += window_offset[0]  # x2
-            det[3] += window_offset[1]  # y2
-            detections.append(det.cpu().numpy())
-
-    return detections
+    return results
 
 
 def nms(boxes, scores, iou_threshold):
@@ -114,75 +112,36 @@ def calculate_iou(box, boxes):
     return iou
 
 
-def sliding_window_detection(model, image_path, device, window_size=600, overlap=100, conf_thres=0.25, iou_thres=0.45):
-    """Run detection on an image using sliding windows"""
-    # Read image
-    img_original = cv2.imread(str(image_path))
-    if img_original is None:
-        print(f"Warning: Could not read image {image_path}")
-        return []
+def sliding_window_detection(image, model, device, window_size=(640, 640), overlap=0.2, conf_thres=0.25,
+                             iou_thres=0.45):
+    # Get image dimensions
+    h, w = image.shape[:2]
 
-    img_original = cv2.cvtColor(img_original, cv2.COLOR_BGR2RGB)
-    h, w = img_original.shape[:2]
-
-    # Calculate step size
-    step = window_size - overlap
+    # Calculate stride (non-overlapping part of each window)
+    stride_h = int(window_size[0] * (1 - overlap))
+    stride_w = int(window_size[1] * (1 - overlap))
 
     all_detections = []
 
-    # Slide window over the image
-    for y in range(0, h, step):
-        for x in range(0, w, step):
-            # Define window boundaries
-            x_end = min(x + window_size, w)
-            y_end = min(y + window_size, h)
+    # Iterate over all positions
+    for y in range(0, h - window_size[0] + stride_h, stride_h):
+        # Adjust y to not exceed image bounds
+        y = min(y, h - window_size[0])
+
+        for x in range(0, w - window_size[1] + stride_w, stride_w):
+            # Adjust x to not exceed image bounds
+            x = min(x, w - window_size[1])
 
             # Extract window
-            window = img_original[y:y_end, x:x_end]
-
-            # Skip small windows
-            if window.shape[0] < 100 or window.shape[1] < 100:
-                continue
-
-            # Pad if window is smaller than window_size
-            if window.shape[0] < window_size or window.shape[1] < window_size:
-                img_resized = np.zeros((window_size, window_size, 3), dtype=np.uint8)
-                img_resized[:window.shape[0], :window.shape[1], :] = window
-                window = img_resized
+            window = image[y:y + window_size[0], x:x + window_size[1]]
 
             # Process window
             window_detections = process_window(model, window, device, conf_thres, iou_thres, window_offset=(x, y))
+
+            # Add to all detections
             all_detections.extend(window_detections)
 
-    # Apply NMS again to merge overlapping detections
-    if all_detections:
-        # Convert to numpy for custom NMS
-        detections = np.array(all_detections)
-
-        # Get boxes, scores and classes
-        boxes = detections[:, :4]
-        scores = detections[:, 4]
-        classes = detections[:, 5].astype(int)
-
-        # Apply NMS per class
-        final_detections = []
-        for cls in np.unique(classes):
-            cls_mask = classes == cls
-            cls_boxes = boxes[cls_mask]
-            cls_scores = scores[cls_mask]
-            cls_indices = np.where(cls_mask)[0]
-
-            # Apply NMS
-            keep_indices = nms(cls_boxes, cls_scores, iou_thres)
-
-            # Keep selected detections
-            for idx in keep_indices:
-                final_detections.append(detections[cls_indices[idx]])
-
-        if final_detections:
-            return np.array(final_detections)
-
-    return []
+    return all_detections
 
 
 def save_results_to_csv(detections, image_path, output_dir, class_names):
@@ -245,9 +204,16 @@ def process_directory(source_dir, weights_path, output_dir, window_size=600, ove
     for img_path in tqdm(image_files, desc="Processing images"):
         print(f"Processing: {img_path}")
 
+        # Load the image first
+        img = cv2.imread(img_path)
+        if img is None:
+            print(f"Error: Could not load image {img_path}")
+            continue
+
+        # Now call with correct parameter order
         detections = sliding_window_detection(
-            model,
-            img_path,
+            img,  # Actual image (not path)
+            model,  # YOLOv5 model
             device,
             window_size=window_size,
             overlap=overlap,
