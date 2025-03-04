@@ -54,6 +54,44 @@ The pipeline produces the following results:
 - **Design Rule Verification Response:**
   - The AI assistant (Claude) provides a response determining whether the design follows the specified rules based on OCR-extracted information.
 
+### **Example Inference (Diagram_1)**
+```text
+# Component Specification Comparison Report
+
+I'll extract specifications from the SOP and search for matching components in the diagram_ocr dataset.
+
+## F-715 A and B Particulate Filters
+
+**Found in diagram_ocr as "F-~7iS A & B PARTICULATE FILTER SEPARATOR"**
+
+Specifications from SOP:
+- Pressure: 275 psig
+- Temperature: 100°F
+
+Specifications from diagram_ocr:
+- Operating: 230 PSIG
+- Design: 275 PSIG @ 100F
+- MDMT: -20F @ 275 PSIG
+- Design Cap: 180 GPM @ 2.25 PSID CLEAN
+
+**Result: INCORRECT**
+- Discrepancy: The diagram shows operating pressure of 230 PSIG, while the SOP only lists the design pressure of 275 PSIG.
+- The design values match (275 PSIG, 100°F), but there's an additional operating value in the diagram.
+
+## Other Components
+
+The following components from SOP were not found in the diagram_ocr dataset:
+- V-745 Stabilizer Tower
+- E-742 Exchanger (Shell and Tube)
+- AC-746 After Cooler
+
+As per instructions, I'm not reporting on these missing components.
+
+## Explicit Design Rule Violations Found
+
+No explicit design rule violations were found. The only discrepancy noted is that the diagram shows an operating pressure (230 PSIG) for the F-715 A & B Particulate Filters, which is below the design pressure (275 PSIG) listed in both the SOP and diagram. This is not a violation, as equipment should operate below its design pressure.
+```
+
 ## **Notes**
 - Ensure all dependencies are installed before running the scripts.
 - The script dynamically selects the latest detection folder (`exp{run_number}`).
