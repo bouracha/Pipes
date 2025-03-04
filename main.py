@@ -31,6 +31,8 @@ def main():
 
     # Get the latest experiment folder number
     latest_exp = get_latest_exp_number(detect_folder)
+    if latest_exp == 0:
+        latest_exp = ''
     latest_exp_folder = os.path.join(detect_folder, f"exp{latest_exp}")
 
     # Copy split_metadata.csv to the latest experiment folder
