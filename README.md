@@ -34,12 +34,6 @@ wget https://github.com/ch-hristov/p-id-symbols/raw/main/best.pt --quiet
 
 cd ..
 ```
-```bash
-git clone https://github.com/ultralytics/yolov5 --quiet  # clone YOLOv5 repo
-cd yolov5
-pip install -r requirements.txt --quiet  # install dependencies
-cd ..
-```
 
 ## **File and Directory Setup**
 1. **Place `sop.docx` in the main project directory.**
